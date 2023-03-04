@@ -1,23 +1,27 @@
 const express = require("express");
 const cors = require("cors");
 const ejs = require("ejs");
-const app = express();
+const morgan = require("morgan");
 require("./config/database");
 require("dotenv").config();
 require("./config/passport");
-const User = require("./models/user.model");
+const User = require("./models/User");
 const bcrypt = require("bcrypt");
-const saltRounds = 10;
 
 const passport = require("passport");
 const session = require("express-session");
 const MongoStore = require("connect-mongo");
 
+const app = express();
+
+// middleware
 app.set("view engine", "ejs");
+app.use(morgan("dev"));
 app.use(cors());
 app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
 
+// session
 app.set("trust proxy", 1); // trust first proxy
 app.use(
     session({
@@ -28,12 +32,30 @@ app.use(
             mongoUrl: process.env.MONGO_URL,
             collectionName: "sessions",
         }),
-        // cookie: { secure: true },
     })
 );
 
+// passport
 app.use(passport.initialize());
 app.use(passport.session());
+
+
+// auth middleware
+const authMiddleware = (req, res, next) => {
+    if (req.isAuthenticated()) {
+        return res.redirect("/profile");
+    }
+    return next();
+}
+
+// profile middleware
+const prifileMiddleware = (req, res, next) => {
+    if (req.isAuthenticated()) {
+        return next();
+    }
+    return res.redirect("/login");
+}
+
 
 // base url
 app.get("/", (req, res) => {
@@ -41,7 +63,7 @@ app.get("/", (req, res) => {
 });
 
 // register : get
-app.get("/register", (req, res) => {
+app.get("/register", authMiddleware, (req, res) => {
     res.render("register");
 });
 
@@ -51,7 +73,7 @@ app.post("/register", async (req, res) => {
         const user = await User.findOne({ username: req.body.username });
         if (user) return res.status(400).send("user already exists");
 
-        bcrypt.hash(req.body.password, saltRounds, async (err, hash) => {
+        bcrypt.hash(req.body.password, 10, async (err, hash) => {
             const newUser = new User({
                 username: req.body.username,
                 password: hash,
@@ -64,15 +86,8 @@ app.post("/register", async (req, res) => {
     }
 });
 
-const checkLoggedIn = (req, res, next) => {
-    if (req.isAuthenticated()) {
-        return res.redirect("/profile");
-    }
-    next();
-};
-
 // login : get
-app.get("/login", checkLoggedIn, (req, res) => {
+app.get("/login", authMiddleware, (req, res) => {
     res.render("login");
 });
 
@@ -85,16 +100,9 @@ app.post(
     })
 );
 
-const checkAuthenticated = (req, res, next) => {
-    if (req.isAuthenticated()) {
-        return next();
-    }
-    res.redirect("/login");
-};
-
 // profile protected route
-app.get("/profile", checkAuthenticated, (req, res) => {
-    res.render("profile");
+app.get("/profile", prifileMiddleware, (req, res) => {
+    res.render("profile", { username: req.user.username });
 });
 
 // logout route
